@@ -1,11 +1,13 @@
 #!/usr/bin/env tarantool
 
+local argparse = require('argparse')
 local json = require('json')
 local log = require('log')
 
-HTTP_HOST = 'localhost'
-HTTP_PORT = '8080'
-MAX_REQUESTS_PER_SECONDS = 10
+DEFAULT_HTTP_HOST = 'localhost'
+DEFAULT_HTTP_PORT = '8080'
+DEFAULT_MAX_REQUESTS_PER_SECONDS = 10
+DEFAULT_DATA_DIR = './data'
 
 
 function on_index(req)
@@ -155,43 +157,64 @@ function build_rate_limiter_middleware(max_requests_per_second)
 end
 
 
-box.cfg{
-    memtx_dir='./data',
-    wal_dir='./data'
-}
+function init_box(data_dir)
+    box.cfg{
+        memtx_dir = data_dir,
+        wal_dir = data_dir
+    }
 
-box.once(
-    'bootstrap_db',
-    function ()
-        local kvs = box.schema.space.create('kv')
-        kvs:format{
-            {name = 'key', type = 'string'},
-            {name = 'value'}
+    box.once(
+        'bootstrap_db',
+        function ()
+            local kvs = box.schema.space.create('kv')
+            kvs:format{
+                {name = 'key', type = 'string'},
+                {name = 'value'}
+            }
+            kvs:create_index('pk', {type = 'hash', parts = {'key'}})
+        end
+    )
+end
+
+
+function init_webserver(host, port, rate_limit)
+    local server = require('http.server').new(
+        host,
+        port,
+        {
+            display_errors = false
         }
-        kvs:create_index('pk', {type = 'hash', parts = {'key'}})
-    end
-)
+    )
+    local router = require('http.router').new()
+    server:set_router(router)
+    router:route({path = '/'}, on_index)
+    router:route({path = '/kv', method='POST'}, on_create_key)
+    router:route({path = '/kv/:key', method='GET'}, on_get_value)
+    router:route({path = '/kv/:key', method='PUT'}, on_update_value)
+    router:route({path = '/kv/:key', method='DELETE'}, on_delete_key)
+    local ok = router:use(
+        build_rate_limiter_middleware(rate_limit),
+        {
+            path = '/kv.*',
+            method = 'ANY'
+        }
+    )
+    return server
+end
 
-local server = require('http.server').new(
-    HTTP_HOST,
-    HTTP_PORT,
-    {
-        display_errors = false
-    }
-)
-local router = require('http.router').new()
-server:set_router(router)
-router:route({path = '/'}, on_index)
-router:route({path = '/kv', method='POST'}, on_create_key)
-router:route({path = '/kv/:key', method='GET'}, on_get_value)
-router:route({path = '/kv/:key', method='PUT'}, on_update_value)
-router:route({path = '/kv/:key', method='DELETE'}, on_delete_key)
-local ok = router:use(
-    build_rate_limiter_middleware(MAX_REQUESTS_PER_SECONDS),
-    {
-        path = '/kv.*',
-        method = 'ANY'
-    }
-)
 
+local parser = argparse{
+    description = 'Simple key-value storage',
+    epilog = 'For more info, see https://github.com/unhandled-exception/tkv'
+}
+parser:option{name = '-d --data-dir',   default = DEFAULT_DATA_DIR,                 description = 'Tarantool data dir'}
+parser:option{name = '-h --host',       default = DEFAULT_HTTP_HOST,                description = 'HTTP host'}
+parser:option{name = '-p --port',       default = DEFAULT_HTTP_PORT,                description = 'HTTP port'}
+parser:option{name = '-r --rate-limit', default = DEFAULT_MAX_REQUESTS_PER_SECONDS, description = 'Max requests per seconds'}
+local args = parser:parse()
+
+log.info(args)
+
+init_box(args.data_dir)
+local server = init_webserver(args.host, args.port, args.rate_limit)
 server:start()
