@@ -6,7 +6,7 @@ local log = require('log')
 
 DEFAULT_HTTP_HOST = 'localhost'
 DEFAULT_HTTP_PORT = '8080'
-DEFAULT_MAX_REQUESTS_PER_SECONDS = 10
+DEFAULT_MAX_REQUESTS_PER_SECONDS = 25
 DEFAULT_DATA_DIR = './data'
 
 
@@ -98,6 +98,7 @@ function on_delete_key(req)
     local data = box.space.kv:get(key)
     if data then
         box.space.kv:delete(key)
+        result = {status = 'ok'}
         log.info('Delete key. Delete key=' .. key)
     else
         status = 404
