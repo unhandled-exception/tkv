@@ -3,11 +3,13 @@
 local argparse = require('argparse')
 local json = require('json')
 local log = require('log')
+local fio = require('fio')
 
 DEFAULT_HTTP_HOST = 'localhost'
 DEFAULT_HTTP_PORT = '8080'
 DEFAULT_MAX_REQUESTS_PER_SECONDS = 25
 DEFAULT_DATA_DIR = './data'
+DEFAULT_LOG_FILE = ''
 
 
 function on_index(req)
@@ -158,10 +160,13 @@ function build_rate_limiter_middleware(max_requests_per_second)
 end
 
 
-function init_box(data_dir)
+function init_box(data_dir, log_filename)
+    fio.mktree(data_dir)
+
     box.cfg{
         memtx_dir = data_dir,
-        wal_dir = data_dir
+        wal_dir = data_dir,
+        log = log_filename
     }
 
     box.once(
@@ -209,13 +214,12 @@ local parser = argparse{
     epilog = 'For more info, see https://github.com/unhandled-exception/tkv'
 }
 parser:option{name = '-d --data-dir',   default = DEFAULT_DATA_DIR,                 description = 'Tarantool data dir'}
+parser:option{name = '-l --log-file',   default = DEFAULT_LOG_FILE,                 description = 'Tarantool log file name (if empty write to stdout)'}
 parser:option{name = '-h --host',       default = DEFAULT_HTTP_HOST,                description = 'HTTP host'}
 parser:option{name = '-p --port',       default = DEFAULT_HTTP_PORT,                description = 'HTTP port'}
 parser:option{name = '-r --rate-limit', default = DEFAULT_MAX_REQUESTS_PER_SECONDS, description = 'Max requests per seconds'}
 local args = parser:parse()
 
-log.info(args)
-
-init_box(args.data_dir)
+init_box(args.data_dir, args.log_file)
 local server = init_webserver(args.host, args.port, args.rate_limit)
 server:start()
