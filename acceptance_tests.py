@@ -71,6 +71,8 @@ class TestTarantoolKVStorageAPI(unittest.TestCase):
             json.dumps('value'),
             json.dumps(dict(value='value')),
             json.dumps(dict(key='key')),
+            json.dumps(dict(key={'name': 'test'}, value='test')),
+            json.dumps(dict(key=1234, value='test')),
         ]
         for q in bad_json:
             r = requests.post(self.url, data=q)
